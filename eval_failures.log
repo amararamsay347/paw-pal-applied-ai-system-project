@@ -1,0 +1,4 @@
+2026-11-18 00:28:02,712 WARNING MISS q='sick dog meds' expected=medication.md got=['exercise.md', 'feeding.md', 'grooming.md']
+2026-11-18 00:28:02,712 WARNING MISS q="my cat's fur is getting tangled" expected=grooming.md got=['feeding.md', 'exercise.md', 'medication.md']
+2026-11-18 00:28:02,713 WARNING MISS q='getting my old dog checked over' expected=vet_visits.md got=['exercise.md', 'feeding.md', 'grooming.md']
+2026-11-18 00:28:02,713 WARNING MISS q='can I give the pills with dinner' expected=medication.md got=['feeding.md']

@@ -1,0 +1,130 @@
+---
+title: PawPal+ System Diagram - Agentic Workflow + RAG + Validation
+---
+flowchart TD
+    %% Legend: solid blue = existing PawPal+ code, green = NEW (RAG / agent / validation),
+    %% orange = human checkpoint, purple = automated testing / guardrail
+
+    %% ───────────── INPUT ─────────────
+    subgraph INPUT["1. INPUT"]
+        direction TB
+        U(["Pet owner"])
+        UI["Streamlit UI - app.py<br/>forms: owner, pets, tasks<br/>plus NEW free-text request,<br/>e.g. Plan Max's day, he is on antibiotics"]
+        U --> UI
+    end
+
+    %% ───────────── KNOWLEDGE BASE (offline) ─────────────
+    subgraph KB["KNOWLEDGE BASE - built offline"]
+        direction TB
+        DOCS[("Pet-care documents<br/>feeding guides, breed notes,<br/>medication and vet-visit rules<br/>kb/*.md")]
+        CHUNK["Chunk + embed<br/>ingest.py"]
+        VDB[("Vector store<br/>chroma / FAISS")]
+        DOCS --> CHUNK --> VDB
+    end
+
+    %% ───────────── PROCESS ─────────────
+    subgraph PROCESS["2. PROCESS - agentic workflow"]
+        direction TB
+
+        CTX["Context builder<br/>reads Owner, Pets, Tasks, TimeSlots<br/>via Owner.get_all_tasks"]
+
+        subgraph RAG["Retrieval-Augmented Generation"]
+            direction TB
+            RET["RETRIEVER<br/>embed query from pet species, breed,<br/>age, task names, owner request<br/>top-k similarity search"]
+            RERANK["Filter + rerank<br/>drop low-score chunks<br/>keep source ids for citation"]
+            RET --> RERANK
+        end
+
+        subgraph AGENT["AGENT - plan / act / check loop"]
+            direction TB
+            PLAN["1 PLAN<br/>LLM drafts steps from request,<br/>owner data and retrieved facts"]
+            TOOLS["2 ACT - tool calls<br/>existing Scheduler methods:<br/>build_daily_schedule, prioritize_tasks,<br/>find_next_available_slot,<br/>conflict_warnings, explain_choice"]
+            PROPOSE["3 PROPOSE<br/>draft schedule +<br/>cited explanations +<br/>confidence score"]
+            PLAN --> TOOLS --> PROPOSE
+        end
+
+        CTX --> RET
+        RERANK -->|"retrieved context"| PLAN
+        RET -.->|"agent can re-query<br/>if it needs more facts"| TOOLS
+    end
+
+    %% ───────────── VALIDATION ─────────────
+    subgraph VALID["3. VALIDATION - automated guardrails"]
+        direction TB
+        V1{"Rule checks<br/>no conflicts, fits TimeSlots,<br/>valid priority and frequency,<br/>schema is valid JSON"}
+        V2{"Grounding check<br/>every claim cites a retrieved<br/>source? any hallucinated advice?"}
+        V3{"Safety check<br/>medication and vet-related<br/>advice flagged?"}
+        V1 --> V2 --> V3
+    end
+
+    %% ───────────── HUMAN REVIEW ─────────────
+    HITL{{"HUMAN CHECKPOINT<br/>Owner reviews proposed plan,<br/>sources and warnings in Streamlit<br/>Approve / Edit / Reject"}}
+
+    %% ───────────── OUTPUT ─────────────
+    subgraph OUTPUT["4. OUTPUT"]
+        direction TB
+        PLANOUT["Approved daily plan<br/>+ explanations + citations<br/>+ red conflict warnings"]
+        SAVE[("data.json<br/>Owner.save_to_json")]
+        REM["Optional Reminder<br/>create_reminder"]
+        PLANOUT --> SAVE
+        PLANOUT --> REM
+    end
+
+    %% ───────────── TESTING / EVALUATION ─────────────
+    subgraph TEST["TESTING AND EVALUATION - developer side"]
+        direction TB
+        T1["Unit tests - pytest<br/>existing 38 tests for scheduler logic<br/>plus NEW tests for retriever and validators"]
+        T2["RAG evaluation set<br/>gold questions -> expected source chunk<br/>measures retrieval hit-rate"]
+        T3["Agent eval and regression<br/>fixed scenarios: conflicts,<br/>recurring tasks, out-of-window tasks<br/>LLM output mocked for determinism"]
+        T4["Human spot-check of logged runs<br/>review rejected / low-confidence plans"]
+    end
+
+    LOG[("Run log<br/>request, retrieved chunks,<br/>draft, validator results,<br/>human decision")]
+
+    %% ───────────── MAIN FLOW ─────────────
+    UI -->|"task forms"| CTX
+    UI -->|"free-text request"| RET
+    VDB -->|"top-k chunks"| RET
+
+    PROPOSE --> V1
+    V3 -->|"all checks pass"| HITL
+    V1 -->|"fail"| FIX
+    V2 -->|"fail"| FIX
+    V3 -->|"flagged"| HITL
+    FIX["Retry with validator feedback<br/>max 2 attempts"] --> PLAN
+    FIX -->|"retries exhausted"| FALL["Fallback: deterministic<br/>Scheduler.build_daily_schedule<br/>with no AI text"]
+    FALL --> HITL
+
+    HITL -->|"approve"| PLANOUT
+    HITL -->|"edit: move or delete task<br/>Task.reschedule / Pet.remove_task"| PLANOUT
+    HITL -->|"reject + feedback"| PLAN
+
+    PLANOUT --> UI
+
+    %% ───────────── LOGGING + TEST LINKS ─────────────
+    RET -.-> LOG
+    PROPOSE -.-> LOG
+    V3 -.-> LOG
+    HITL -.-> LOG
+    LOG -.->|"failures become new test cases"| T3
+    LOG -.-> T4
+
+    T1 -.->|"verifies"| TOOLS
+    T1 -.->|"verifies"| V1
+    T2 -.->|"scores"| RET
+    T3 -.->|"exercises end to end"| PLAN
+    T4 -.->|"tunes prompts, thresholds, KB"| DOCS
+
+    %% ───────────── STYLES ─────────────
+    classDef existing fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
+    classDef newcomp fill:#dcfce7,stroke:#15803d,color:#0f172a
+    classDef human fill:#ffedd5,stroke:#c2410c,stroke-width:3px,color:#0f172a
+    classDef testing fill:#ede9fe,stroke:#6d28d9,color:#0f172a
+    classDef store fill:#f1f5f9,stroke:#475569,color:#0f172a
+
+    class U,UI,CTX,TOOLS,PLANOUT,REM,FALL existing
+    class RET,RERANK,PLAN,PROPOSE,CHUNK,FIX newcomp
+    class V1,V2,V3 testing
+    class HITL human
+    class T1,T2,T3,T4 testing
+    class DOCS,VDB,SAVE,LOG store
