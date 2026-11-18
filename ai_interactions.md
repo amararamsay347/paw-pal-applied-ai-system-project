@@ -50,3 +50,64 @@
 **Which approach did you use in your final implementation and why?**
 
 <!-- Your conclusion -->
+
+---
+
+## Agent Reasoning Traces (RAG + validation agent)
+
+Each run's step-by-step reasoning (plan, tool calls, retrieval, validation, human decision), written by `agent.py`.
+
+### Agent run 2026-11-18 01:12:09: plan for 2026-10-01
+- **Request:** Plan Max's day
+- **Explainer:** mock (offline, rule-based)
+1. **PLAN**: Request "Plan Max's day": covering Max on 2026-10-01 (pets named in the request)
+2. **ACT**: Tool build_daily_schedule -> 2 task(s): Vet appointment, Grooming. Tool conflict_warnings -> 4 warning(s).
+3. **RETRIEVE**: Per-task retrieval: Vet appointment -> vet_visits.md (0.375); Grooming -> vet_visits.md (0.217). Request retrieval: medication.md, vet_visits.md.
+4. **EXPLAIN**: Attempt 1 via mock (offline, rule-based): drafted 2 item(s).
+5. **VALIDATE**: Attempt 1: passed (3 warning(s), needs_human=True).
+   - `76ba30ed` 'Vet appointment' has highest priority, is scheduled for 14:00 (once). It is #1 of 2 today: it has the highest priority of the day. It overlaps with 'Grooming'. Guidance: Treat vet appointments as the highest priority on the schedule, and do not overlap them with other tasks. [vet_visits.md]
+   - `e93bbfc5` 'Grooming' has low priority, is scheduled for 14:30 (once). It is #2 of 2 today: 'Vet appointment' comes first because it has higher priority (highest). It overlaps with 'Vet appointment'. Guidance: Plan extra time around a vet appointment. [vet_visits.md]
+   - warning [rules] 'Vet appointment' and 'Grooming' overlap.
+   - warning [safety] Medication or vet-related item: human review required.
+   - warning [safety] Medication or vet-related item: human review required.
+- **Outcome:** ok=True, used_fallback=False, needs_human=True, attempts=1
+
+### Agent run 2026-11-18 01:12:09: plan for 2026-10-01
+- **Request:** Plan Buddy's day
+- **Explainer:** mock (offline, rule-based) + injected fault (1 bad attempt(s))
+1. **PLAN**: Request "Plan Buddy's day": covering Buddy on 2026-10-01 (pets named in the request)
+2. **ACT**: Tool build_daily_schedule -> 3 task(s): Breakfast, Evening walk, Brushing. Tool conflict_warnings -> 4 warning(s).
+3. **RETRIEVE**: Per-task retrieval: Breakfast -> feeding.md (0.212); Evening walk -> exercise.md (0.258); Brushing -> grooming.md (0.327). Request retrieval: medication.md, vet_visits.md.
+4. **EXPLAIN**: Attempt 1 via mock (offline, rule-based) + injected fault (1 bad attempt(s)): drafted 3 item(s).
+5. **VALIDATE**: Attempt 1: FAILED with 1 error(s): [grounding] Cites 'dog_handbook.md', which was not retrieved.
+6. **EXPLAIN**: Attempt 2 via mock (offline, rule-based) + injected fault (1 bad attempt(s)): drafted 3 item(s). Included validator feedback.
+7. **VALIDATE**: Attempt 2: passed (0 warning(s), needs_human=False).
+   - `b7321bb3` 'Breakfast' has high priority, is scheduled for 08:00 (daily). It is #1 of 3 today: it has the highest priority of the day. Guidance: Most adult dogs do well with two meals a day, roughly 8 to 12 hours apart, for example breakfast at 8:00 and dinner at 18:00. [feeding.md]
+   - `9401f774` 'Evening walk' has medium priority, is scheduled for 16:00 (once). It is #2 of 3 today: 'Breakfast' comes first because it has higher priority (high). Guidance: In hot weather, walk early in the morning or in the evening and bring water. [exercise.md]
+   - `bc054596` 'Brushing' has low priority, is scheduled for 11:00 (once). It is #3 of 3 today: 'Evening walk' comes first because it has higher priority (medium). Guidance: Brushing frequency depends on coat type. [grooming.md]
+- **Outcome:** ok=True, used_fallback=False, needs_human=False, attempts=2
+
+### Agent run 2026-11-18 01:12:09: plan for 2026-10-01
+- **Request:** Plan Joe's day
+- **Explainer:** mock (offline, rule-based) + injected fault (99 bad attempt(s))
+1. **PLAN**: Request "Plan Joe's day": covering Joe on 2026-10-01 (pets named in the request)
+2. **ACT**: Tool build_daily_schedule -> 3 task(s): Medication, Training session, Playtime. Tool conflict_warnings -> 4 warning(s).
+3. **RETRIEVE**: Per-task retrieval: Medication -> medication.md (0.217); Training session -> exercise.md (0.379); Playtime -> no match. Request retrieval: medication.md, vet_visits.md.
+4. **EXPLAIN**: Attempt 1 via mock (offline, rule-based) + injected fault (99 bad attempt(s)): drafted 3 item(s).
+5. **VALIDATE**: Attempt 1: FAILED with 1 error(s): [grounding] Cites 'dog_handbook.md', which was not retrieved.
+6. **EXPLAIN**: Attempt 2 via mock (offline, rule-based) + injected fault (99 bad attempt(s)): drafted 3 item(s). Included validator feedback.
+7. **VALIDATE**: Attempt 2: FAILED with 1 error(s): [grounding] Cites 'dog_handbook.md', which was not retrieved.
+8. **EXPLAIN**: Attempt 3 via mock (offline, rule-based) + injected fault (99 bad attempt(s)): drafted 3 item(s). Included validator feedback.
+9. **VALIDATE**: Attempt 3: FAILED with 1 error(s): [grounding] Cites 'dog_handbook.md', which was not retrieved.
+10. **FALLBACK**: All 3 attempts failed validation, so the plan uses the plain scheduler explanations with no AI text (valid=True).
+   - `198d96b5` 'Medication' has high priority, is scheduled for 09:00 (once). It is #1 of 3 today: it has the highest priority of the day.
+   - `9609d1c7` 'Training session' has medium priority, is scheduled for 11:00 (once). It is #2 of 3 today: 'Medication' comes first because it has higher priority (high). It overlaps with 'Playtime'.
+   - `acdee542` 'Playtime' has low priority, is scheduled for 11:00 (once). It is #3 of 3 today: 'Training session' comes first because it has higher priority (medium). It overlaps with 'Training session'.
+   - warning [rules] 'Training session' and 'Playtime' overlap.
+   - warning [grounding] Explanation cites no source.
+   - warning [grounding] Explanation cites no source.
+   - warning [grounding] Explanation cites no source.
+   - warning [safety] Medication or vet-related item: human review required.
+   - warning [safety] Medication or vet-related item: human review required.
+- **Outcome:** ok=True, used_fallback=True, needs_human=True, attempts=3
+

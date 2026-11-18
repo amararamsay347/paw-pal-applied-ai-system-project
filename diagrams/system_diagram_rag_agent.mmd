@@ -1,130 +1,106 @@
 ---
-title: PawPal+ System Diagram - Agentic Workflow + RAG + Validation
+title: PawPal+ System Diagram - Agent + RAG + Validation (matches the code)
 ---
 flowchart TD
-    %% Legend: solid blue = existing PawPal+ code, green = NEW (RAG / agent / validation),
-    %% orange = human checkpoint, purple = automated testing / guardrail
+    %% Every box maps to a real file. Blue = original PawPal+ code, green = AI layer added in Project 4,
+    %% purple = automated validation / testing, orange = human checkpoint, grey = stored data and logs.
 
-    %% ───────────── INPUT ─────────────
+    %% ───────────── 1. INPUT ─────────────
     subgraph INPUT["1. INPUT"]
         direction TB
-        U(["Pet owner"])
-        UI["Streamlit UI - app.py<br/>forms: owner, pets, tasks<br/>plus NEW free-text request,<br/>e.g. Plan Max's day, he is on antibiotics"]
-        U --> UI
+        OWNER(["Pet owner"])
+        UI["Streamlit UI - app.py<br/>owner, pet and task forms<br/>AI Plan Assistant: date + optional request<br/>e.g. Plan Max's day"]
+        DATA[("data.json<br/>Owner.load_from_json")]
+        OWNER --> UI
+        DATA --> UI
     end
 
-    %% ───────────── KNOWLEDGE BASE (offline) ─────────────
-    subgraph KB["KNOWLEDGE BASE - built offline"]
+    KB[("Knowledge base - kb/*.md<br/>feeding, medication, exercise,<br/>grooming, vet_visits")]
+
+    %% ───────────── 2. PROCESS ─────────────
+    subgraph PROCESS["2. PROCESS - PlanningAgent.run in agent.py"]
         direction TB
-        DOCS[("Pet-care documents<br/>feeding guides, breed notes,<br/>medication and vet-visit rules<br/>kb/*.md")]
-        CHUNK["Chunk + embed<br/>ingest.py"]
-        VDB[("Vector store<br/>chroma / FAISS")]
-        DOCS --> CHUNK --> VDB
+        S1["Step 1 PLAN<br/>pick pets named in the request,<br/>otherwise all pets"]
+        S2["Step 2 ACT - scheduler tools<br/>Scheduler.build_daily_schedule<br/>Scheduler.conflict_warnings<br/>pawpal_system.py"]
+        S3["Step 3 RETRIEVE - retriever.py<br/>TF-IDF keyword search over paragraph chunks<br/>query = task name, plus the request<br/>top 2 hits, score cutoff 0.1<br/>each hit keeps its source file"]
+        S4["Step 4 EXPLAIN<br/>write a cited explanation per task"]
+        EXPL{"Explainer<br/>ANTHROPIC_API_KEY set?"}
+        MOCK["MockExplainer<br/>offline, rule-based"]
+        CLAUDE["ClaudeExplainer<br/>Claude API, JSON reply"]
+        S1 --> S2 --> S3 --> S4 --> EXPL
+        EXPL -->|no| MOCK
+        EXPL -->|yes| CLAUDE
     end
 
-    %% ───────────── PROCESS ─────────────
-    subgraph PROCESS["2. PROCESS - agentic workflow"]
+    %% ───────────── 3. VALIDATION ─────────────
+    subgraph VALID["3. VALIDATION - validators.py plus coverage check in agent.py"]
         direction TB
-
-        CTX["Context builder<br/>reads Owner, Pets, Tasks, TimeSlots<br/>via Owner.get_all_tasks"]
-
-        subgraph RAG["Retrieval-Augmented Generation"]
-            direction TB
-            RET["RETRIEVER<br/>embed query from pet species, breed,<br/>age, task names, owner request<br/>top-k similarity search"]
-            RERANK["Filter + rerank<br/>drop low-score chunks<br/>keep source ids for citation"]
-            RET --> RERANK
-        end
-
-        subgraph AGENT["AGENT - plan / act / check loop"]
-            direction TB
-            PLAN["1 PLAN<br/>LLM drafts steps from request,<br/>owner data and retrieved facts"]
-            TOOLS["2 ACT - tool calls<br/>existing Scheduler methods:<br/>build_daily_schedule, prioritize_tasks,<br/>find_next_available_slot,<br/>conflict_warnings, explain_choice"]
-            PROPOSE["3 PROPOSE<br/>draft schedule +<br/>cited explanations +<br/>confidence score"]
-            PLAN --> TOOLS --> PROPOSE
-        end
-
-        CTX --> RET
-        RERANK -->|"retrieved context"| PLAN
-        RET -.->|"agent can re-query<br/>if it needs more facts"| TOOLS
+        V["validate_plan<br/>rules: task ids exist, on this day, pending, inside availability, none missing<br/>grounding: every citation was actually retrieved<br/>safety: dose-changing advice is an error, medication or vet items flag needs_human<br/>overlaps and uncited text are warnings"]
+        PASS{"Any errors?"}
+        RETRY["Retry EXPLAIN with the error text as feedback<br/>up to max_retries = 2 more attempts"]
+        FALL["Step 6 FALLBACK<br/>plain Scheduler.explain_choice text,<br/>no AI-written content"]
+        V --> PASS
+        PASS -->|yes, attempts left| RETRY
+        PASS -->|yes, attempts used up| FALL
     end
 
-    %% ───────────── VALIDATION ─────────────
-    subgraph VALID["3. VALIDATION - automated guardrails"]
-        direction TB
-        V1{"Rule checks<br/>no conflicts, fits TimeSlots,<br/>valid priority and frequency,<br/>schema is valid JSON"}
-        V2{"Grounding check<br/>every claim cites a retrieved<br/>source? any hallucinated advice?"}
-        V3{"Safety check<br/>medication and vet-related<br/>advice flagged?"}
-        V1 --> V2 --> V3
-    end
+    %% ───────────── HUMAN ─────────────
+    HUMAN{{"HUMAN CHECKPOINT - app.py<br/>owner reads the plan, citations, warnings<br/>and the medication or vet notice<br/>Approve or Reject<br/>Approve is disabled while errors remain"}}
 
-    %% ───────────── HUMAN REVIEW ─────────────
-    HITL{{"HUMAN CHECKPOINT<br/>Owner reviews proposed plan,<br/>sources and warnings in Streamlit<br/>Approve / Edit / Reject"}}
-
-    %% ───────────── OUTPUT ─────────────
+    %% ───────────── 4. OUTPUT ─────────────
     subgraph OUTPUT["4. OUTPUT"]
         direction TB
-        PLANOUT["Approved daily plan<br/>+ explanations + citations<br/>+ red conflict warnings"]
-        SAVE[("data.json<br/>Owner.save_to_json")]
-        REM["Optional Reminder<br/>create_reminder"]
-        PLANOUT --> SAVE
-        PLANOUT --> REM
+        PLANOUT["Cited daily plan shown in Streamlit<br/>explainer name, attempts, fallback flag,<br/>agent reasoning trace"]
+        LOGMD[("ai_interactions.md<br/>reasoning trace per run<br/>and the human decision")]
+        LOGTXT[("pawpal.log<br/>agent and validator log lines")]
     end
 
-    %% ───────────── TESTING / EVALUATION ─────────────
-    subgraph TEST["TESTING AND EVALUATION - developer side"]
+    %% ───────────── TESTING ─────────────
+    subgraph TEST["TESTING AND EVALUATION"]
         direction TB
-        T1["Unit tests - pytest<br/>existing 38 tests for scheduler logic<br/>plus NEW tests for retriever and validators"]
-        T2["RAG evaluation set<br/>gold questions -> expected source chunk<br/>measures retrieval hit-rate"]
-        T3["Agent eval and regression<br/>fixed scenarios: conflicts,<br/>recurring tasks, out-of-window tasks<br/>LLM output mocked for determinism"]
-        T4["Human spot-check of logged runs<br/>review rejected / low-confidence plans"]
+        T1["pytest - 87 passing<br/>test_pawpal.py scheduler<br/>test_retriever.py<br/>test_validators.py<br/>test_agent.py with fake explainers"]
+        T2["eval_retrieval.py<br/>12 labelled questions, hit rate<br/>6 of 6 direct, 2 of 6 paraphrased<br/>writes eval_failures.log"]
+        T3["demo_guardrails.py<br/>5 bad or safe plans through the validators"]
+        T4["demo_agent.py<br/>3 end-to-end runs: normal,<br/>retry, fallback - last two use an injected fault"]
     end
-
-    LOG[("Run log<br/>request, retrieved chunks,<br/>draft, validator results,<br/>human decision")]
 
     %% ───────────── MAIN FLOW ─────────────
-    UI -->|"task forms"| CTX
-    UI -->|"free-text request"| RET
-    VDB -->|"top-k chunks"| RET
-
-    PROPOSE --> V1
-    V3 -->|"all checks pass"| HITL
-    V1 -->|"fail"| FIX
-    V2 -->|"fail"| FIX
-    V3 -->|"flagged"| HITL
-    FIX["Retry with validator feedback<br/>max 2 attempts"] --> PLAN
-    FIX -->|"retries exhausted"| FALL["Fallback: deterministic<br/>Scheduler.build_daily_schedule<br/>with no AI text"]
-    FALL --> HITL
-
-    HITL -->|"approve"| PLANOUT
-    HITL -->|"edit: move or delete task<br/>Task.reschedule / Pet.remove_task"| PLANOUT
-    HITL -->|"reject + feedback"| PLAN
-
+    UI -->|"owner, pets, tasks, day, request"| S1
+    DATA -.-> S2
+    KB -->|"read and split into paragraphs when the agent is created"| S3
+    MOCK --> V
+    CLAUDE --> V
+    RETRY --> S4
+    PASS -->|no| HUMAN
+    FALL --> HUMAN
+    HUMAN -->|approve or reject| PLANOUT
     PLANOUT --> UI
 
-    %% ───────────── LOGGING + TEST LINKS ─────────────
-    RET -.-> LOG
-    PROPOSE -.-> LOG
-    V3 -.-> LOG
-    HITL -.-> LOG
-    LOG -.->|"failures become new test cases"| T3
-    LOG -.-> T4
+    %% ───────────── LOGGING ─────────────
+    S1 -.->|trace| LOGMD
+    S3 -.->|trace| LOGMD
+    V -.->|trace| LOGMD
+    HUMAN -.->|decision| LOGMD
+    V -.-> LOGTXT
+    S4 -.-> LOGTXT
 
-    T1 -.->|"verifies"| TOOLS
-    T1 -.->|"verifies"| V1
-    T2 -.->|"scores"| RET
-    T3 -.->|"exercises end to end"| PLAN
-    T4 -.->|"tunes prompts, thresholds, KB"| DOCS
+    %% ───────────── TEST LINKS ─────────────
+    T1 -.->|verifies| S2
+    T1 -.->|verifies| V
+    T1 -.->|verifies| S4
+    T2 -.->|measures| S3
+    T3 -.->|exercises| V
+    T4 -.->|runs| S1
 
     %% ───────────── STYLES ─────────────
     classDef existing fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
     classDef newcomp fill:#dcfce7,stroke:#15803d,color:#0f172a
+    classDef valid fill:#ede9fe,stroke:#6d28d9,color:#0f172a
     classDef human fill:#ffedd5,stroke:#c2410c,stroke-width:3px,color:#0f172a
-    classDef testing fill:#ede9fe,stroke:#6d28d9,color:#0f172a
     classDef store fill:#f1f5f9,stroke:#475569,color:#0f172a
 
-    class U,UI,CTX,TOOLS,PLANOUT,REM,FALL existing
-    class RET,RERANK,PLAN,PROPOSE,CHUNK,FIX newcomp
-    class V1,V2,V3 testing
-    class HITL human
-    class T1,T2,T3,T4 testing
-    class DOCS,VDB,SAVE,LOG store
+    class OWNER,UI,S2,PLANOUT existing
+    class S1,S3,S4,EXPL,MOCK,CLAUDE,RETRY,FALL newcomp
+    class V,PASS,T1,T2,T3,T4 valid
+    class HUMAN human
+    class DATA,KB,LOGMD,LOGTXT store

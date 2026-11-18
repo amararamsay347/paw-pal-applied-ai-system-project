@@ -2,6 +2,7 @@ from datetime import date, datetime
 
 import streamlit as st
 
+from agent import PlanningAgent, make_explainer, record_decision, setup_logging, write_trace
 from display import task_emoji
 from pawpal_system import Frequency, Owner, Pet, Priority, Scheduler, Task
 
@@ -221,3 +222,59 @@ if st.button("Generate schedule"):
             + "\n".join(f"- 🔴 {w}" for w in day_warnings),
             icon="🚨",
         )
+
+# --- AI Plan Assistant (RAG + agent + validation + human approval) ---
+st.divider()
+st.subheader("AI Plan Assistant")
+st.caption(
+    "The agent plans with the scheduler, retrieves pet-care guidance, writes cited explanations, "
+    "and checks them with automated validators. You approve or reject the result."
+)
+setup_logging()  # agent and validator log lines go to pawpal.log (safe to call on every rerun)
+ai_day = st.date_input("Plan for", value=date.today(), key="ai_day")
+ai_request = st.text_input("Request (optional)", placeholder="e.g. Plan Max's day", key="ai_request")
+
+if st.button("Generate AI plan"):
+    agent_result = PlanningAgent(explainer=make_explainer()).run(owner, ai_day, ai_request)
+    write_trace(agent_result)  # reasoning trace is saved to ai_interactions.md
+    st.session_state.agent_result = agent_result
+
+agent_result = st.session_state.get("agent_result")
+if agent_result:
+    st.caption(f"Explainer: {agent_result.explainer} | attempts: {agent_result.attempts}")
+    if not agent_result.tasks:
+        st.info("Nothing to plan for that day.")
+    else:
+        if agent_result.used_fallback:
+            st.warning("The AI draft failed validation, so this plan uses the plain scheduler explanations.")
+        if not agent_result.ok:
+            st.error("The plan still has validation errors:\n\n"
+                     + "\n".join(f"- {i.message}" for i in agent_result.validation.errors))
+        by_id = {t.id: t for t in agent_result.tasks}
+        for item in agent_result.plan:
+            task = by_id.get(item["task_id"])
+            if task is not None:
+                st.markdown(f"**{task.time:%H:%M}** - {task.name} ({task.pet.name})  \n{item['explanation']}")
+        for w in agent_result.validation.warnings:
+            if w.check != "safety":
+                st.caption(f"⚠️ [{w.check}] {w.message}")
+        if agent_result.validation.needs_human:
+            st.warning("🧑 Medication or vet-related items are in this plan. Please review them carefully before approving.")
+
+        decisions = st.session_state.setdefault("agent_decisions", {})
+        if agent_result.run_id in decisions:
+            st.success(f"You {decisions[agent_result.run_id]} this plan.")
+        else:
+            c_ok, c_no = st.columns(2)
+            if c_ok.button("Approve plan", key=f"approve_{agent_result.run_id}", disabled=not agent_result.ok):
+                decisions[agent_result.run_id] = "approved"
+                record_decision(agent_result, "approved")
+                st.rerun()
+            if c_no.button("Reject plan", key=f"reject_{agent_result.run_id}"):
+                decisions[agent_result.run_id] = "rejected"
+                record_decision(agent_result, "rejected")
+                st.rerun()
+
+    with st.expander("Agent reasoning trace"):
+        for n, s in enumerate(agent_result.trace, 1):
+            st.write(f"{n}. **{s['step']}**: {s['summary']}")
