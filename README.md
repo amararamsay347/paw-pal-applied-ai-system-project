@@ -300,5 +300,3 @@ Before the AI layer was added, two display tests failed with a `ModuleNotFoundEr
 Building PawPal+ taught me to design the system first and let AI do the part that needs language, not the part that needs correctness. Exact logic (time overlaps, recurrence) belongs in tested code, while AI is better for interpreting requests and explaining choices. The riskiest part of an AI feature is a confident answer nobody checks, so grounding, automated validation and a human decision matter as much as the model. My graded responsible-AI reflection (how I collaborated with AI, a suggestion I accepted and one I rejected or revised, and the system's limitations) is in [`model_card.md`](model_card.md).
 
 ---
-
-*The previous Module 2 README, with the full feature list, persistence notes and complete CLI output, is kept as `README_module2_original.md`.*
