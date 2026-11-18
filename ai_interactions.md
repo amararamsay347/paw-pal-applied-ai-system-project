@@ -111,3 +111,33 @@ Each run's step-by-step reasoning (plan, tool calls, retrieval, validation, huma
    - warning [safety] Medication or vet-related item: human review required.
 - **Outcome:** ok=True, used_fallback=True, needs_human=True, attempts=3
 
+### Agent run 2026-11-18 01:32:27: plan for 2026-11-18
+- **Request:** (none)
+- **Explainer:** mock (offline, rule-based)
+1. **PLAN**: Request '': covering no pets on 2026-11-18 (no pet named, so all pets)
+2. **ACT**: Tool build_daily_schedule -> 0 task(s): none. Tool conflict_warnings -> 0 warning(s).
+3. **DONE**: Nothing to plan, so no retrieval or explanation was needed.
+- **Outcome:** ok=True, used_fallback=False, needs_human=False, attempts=0
+
+### Agent run 2026-11-18 01:34:47: plan for 2026-11-18
+- **Request:** Plan a day around max's vet appointment
+- **Explainer:** mock (offline, rule-based)
+1. **PLAN**: Request "Plan a day around max's vet appointment": covering Max on 2026-11-18 (pets named in the request)
+2. **ACT**: Tool build_daily_schedule -> 1 task(s): Morning walk. Tool conflict_warnings -> 0 warning(s).
+3. **RETRIEVE**: Per-task retrieval: Morning walk -> exercise.md (0.258). Request retrieval: vet_visits.md, vet_visits.md.
+4. **EXPLAIN**: Attempt 1 via mock (offline, rule-based): drafted 1 item(s).
+5. **VALIDATE**: Attempt 1: passed (0 warning(s), needs_human=False).
+   - `48c77ca8` 'Morning walk' has medium priority, is scheduled for 01:32 (daily). It is #1 of 1 today: it's the only task. Guidance: In hot weather, walk early in the morning or in the evening and bring water. [exercise.md]
+- **Outcome:** ok=True, used_fallback=False, needs_human=False, attempts=1
+
+### Agent run 2026-11-18 01:35:19: plan for 2026-11-18
+- **Request:** should jax eat tacos
+- **Explainer:** mock (offline, rule-based)
+1. **PLAN**: Request 'should jax eat tacos': covering Jax on 2026-11-18 (pets named in the request)
+2. **ACT**: Tool build_daily_schedule -> 1 task(s): Morning walk. Tool conflict_warnings -> 0 warning(s).
+3. **RETRIEVE**: Per-task retrieval: Morning walk -> exercise.md (0.258). Request retrieval: feeding.md.
+4. **EXPLAIN**: Attempt 1 via mock (offline, rule-based): drafted 1 item(s).
+5. **VALIDATE**: Attempt 1: passed (0 warning(s), needs_human=False).
+   - `ccf00fe2` 'Morning walk' has medium priority, is scheduled for 01:58 (daily). It is #1 of 1 today: it's the only task. Guidance: In hot weather, walk early in the morning or in the evening and bring water. [exercise.md]
+- **Outcome:** ok=True, used_fallback=False, needs_human=False, attempts=1
+
